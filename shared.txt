@@ -18,3 +18,6 @@ https://github.com/ricardojoserf/NativeDump/tree/nim-flavour
 
 
 VABlAHMAdAAtAE4AZQB0AEMAbwBuAG4AZQBjAHQAaQBvAG4AIAAxADcAMgAuADEAOAAuADEANwAxAC4AMgAyACAALQBQAG8AcgB0ACAAOAAwADgAMQA=
+
+
+echo -n "Test-NetConnection 172.18.171.22 -Port 8081" | iconv -t UTF-16LE | base64 -w0
