@@ -14,3 +14,7 @@ powershell.exe set-mppreference -disablerealtimemonitoring $true
 
 
 https://github.com/ricardojoserf/NativeDump/tree/nim-flavour
+
+
+
+VABlAHMAdAAtAE4AZQB0AEMAbwBuAG4AZQBjAHQAaQBvAG4AIAAxADcAMgAuADEAOAAuADEANwAxAC4AMgAyACAALQBQAG8AcgB0ACAAOAAwADgAMQA=
