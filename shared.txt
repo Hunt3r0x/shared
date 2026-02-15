@@ -11,3 +11,6 @@ net localgroup 'Remote Management Users' deep /add
 
 
 powershell.exe set-mppreference -disablerealtimemonitoring $true
+
+
+https://github.com/ricardojoserf/NativeDump/tree/nim-flavour
