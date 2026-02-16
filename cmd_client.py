@@ -6,7 +6,7 @@ import requests
 SCHEME = "http"
 HOST = "10.143.4.133"
 PATH = "/includes/shell.php"
-TIMEOUT = 5
+TIMEOUT = 120
 SEPARATOR = "=" * 60
 SUB_SEPARATOR = "-" * 60
 
