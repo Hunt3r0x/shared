@@ -20,7 +20,7 @@ SEPARATOR = "=" * 60
 SUB_SEPARATOR = "-" * 60
 # Default chunk size for uploads; can be overridden with the
 # CMD_CLIENT_UPLOAD_CHUNK_SIZE environment variable.
-UPLOAD_CHUNK_SIZE = int(os.getenv("CMD_CLIENT_UPLOAD_CHUNK_SIZE", "5000"))
+UPLOAD_CHUNK_SIZE = int(os.getenv("CMD_CLIENT_UPLOAD_CHUNK_SIZE", "30000"))
 # Default directory on the remote Windows host when no remote path
 # is provided explicitly for uploads.
 DEFAULT_REMOTE_UPLOAD_DIR = r"C:\windows\tasks"
