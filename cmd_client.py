@@ -1,6 +1,7 @@
 import base64
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -26,6 +27,8 @@ DEFAULT_REMOTE_UPLOAD_DIR = r"C:\windows\tasks"
 UPDATE_URL = (
     "https://raw.githubusercontent.com/Hunt3r0x/shared/refs/heads/main/cmd_client.py"
 )
+# Log file for commands and their responses.
+LOG_PATH = Path(__file__).with_name("cmd-client.log")
 
 
 def build_url() -> str:
@@ -81,7 +84,7 @@ def ps_escape_single_quotes(value: str) -> str:
     return value.replace("'", "''")
 
 
-def download_file(remote_path: str, local_path: str) -> None:
+def download_file(remote_path: str, local_path: str) -> int:
     """
     Download a remote file from a **Windows** target by having PowerShell
     base64-encode it, then decoding and writing it locally.
@@ -109,7 +112,7 @@ def download_file(remote_path: str, local_path: str) -> None:
     path = Path(local_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
-    print(f"[download] saved remote '{remote_path}' to '{local_path}' ({len(data)} bytes)")
+    return len(data)
 
 
 def upload_file(local_path: str, remote_path: str) -> None:
@@ -185,27 +188,48 @@ def upload_file(local_path: str, remote_path: str) -> None:
 
 
 def print_response(cmd: str, body: str, status: Optional[int]) -> None:
-    print(SEPARATOR)
-    print(f"cmd: {cmd}")
+    """
+    Print a nicely formatted response to stdout and append it to the log file.
+    """
+    block_lines = []
+    block_lines.append(SEPARATOR)
+    block_lines.append(f"cmd: {cmd}")
     if status is not None:
-        print(f"status: {status}")
-    print(SUB_SEPARATOR)
+        block_lines.append(f"status: {status}")
+    block_lines.append(SUB_SEPARATOR)
+
     text = body.strip()
     if not text:
-        print("[no output]")
+        block_lines.append("[no output]")
     else:
-        lines = [line.rstrip() for line in text.splitlines()]
+        raw_lines = [line.rstrip() for line in text.splitlines()]
         blank = False
-        for line in lines:
+        for line in raw_lines:
             if line:
                 if blank:
                     blank = False
-                print(line)
+                block_lines.append(line)
             else:
                 if not blank:
-                    print()
+                    block_lines.append("")
                     blank = True
-    print(SEPARATOR)
+    block_lines.append(SEPARATOR)
+
+    # Print to console
+    for line in block_lines:
+        print(line)
+
+    # Append to log file with a timestamp header
+    try:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(f"time: {datetime.utcnow().isoformat()}Z\n")
+            for line in block_lines:
+                fh.write(line + "\n")
+            fh.write("\n")
+    except OSError:
+        # Logging failures should not break the client.
+        pass
 
 
 def read_cmd() -> Optional[str]:
@@ -352,9 +376,16 @@ def main() -> None:
                 continue
             _, remote_path, local_path = parts
             try:
-                download_file(remote_path, local_path)
+                size = download_file(remote_path, local_path)
+                msg = (
+                    f"[download] saved remote '{remote_path}' to "
+                    f"'{local_path}' ({size} bytes)"
+                )
+                print_response(cmd, msg, None)
             except Exception as exc:
-                print(f"[download error] {exc}")
+                err = f"[download error] {exc}"
+                print(err)
+                print_response(cmd, err, None)
             continue
 
         if cmd.startswith(":upload"):
