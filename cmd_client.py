@@ -2,7 +2,7 @@ import base64
 import hashlib
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -94,7 +94,8 @@ def send_upload(
         remote_path: Full remote path where the file should be saved
         chunk_index: Optional chunk index (0-based). If None, single upload is assumed.
     """
-    b64_data = base64.b64encode(file_data).decode("ascii")
+    # URL-safe base64 avoids '+' and '/' so form encoding cannot corrupt the payload
+    b64_data = base64.urlsafe_b64encode(file_data).decode("ascii")
     url = build_url()
     post_data = {"r": b64_data, "n": remote_path}
     if chunk_index is not None:
@@ -329,7 +330,7 @@ def print_response(cmd: str, body: str, status: Optional[int]) -> None:
     try:
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with LOG_PATH.open("a", encoding="utf-8") as fh:
-            fh.write(f"time: {datetime.utcnow().isoformat()}Z\n")
+            fh.write(f"time: {datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')}\n")
             for line in block_lines:
                 fh.write(line + "\n")
             fh.write("\n")
