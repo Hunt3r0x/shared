@@ -233,11 +233,34 @@ def read_cmd() -> Optional[str]:
         return ""
     if value.lower() in ("exit", "quit"):
         return None
+
+    # Maintain a unique readline history: each command appears at most once,
+    # positioned according to its most recent use.
     if readline is not None:
         try:
+            try:
+                length = readline.get_current_history_length()
+            except AttributeError:
+                length = 0
+
+            # Remove any existing occurrences of this command from history
+            # (iterate backwards so indices stay valid).
+            if length > 0:
+                for idx in range(length, 0, -1):
+                    item = readline.get_history_item(idx)
+                    if item == value:
+                        try:
+                            readline.remove_history_item(idx - 1)
+                        except Exception:
+                            # Some readline implementations may not support removal;
+                            # in that case we just fall back to normal add_history.
+                            break
+
             readline.add_history(value)
         except Exception:
+            # If anything goes wrong with readline, we just skip history handling.
             pass
+
     return value
 
 
