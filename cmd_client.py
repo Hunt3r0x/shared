@@ -19,7 +19,7 @@ SEPARATOR = "=" * 60
 SUB_SEPARATOR = "-" * 60
 # Default chunk size for uploads; can be overridden with the
 # CMD_CLIENT_UPLOAD_CHUNK_SIZE environment variable.
-UPLOAD_CHUNK_SIZE = int(os.getenv("CMD_CLIENT_UPLOAD_CHUNK_SIZE", "60000"))
+UPLOAD_CHUNK_SIZE = int(os.getenv("CMD_CLIENT_UPLOAD_CHUNK_SIZE", "2000"))
 UPDATE_URL = (
     "https://raw.githubusercontent.com/Hunt3r0x/shared/refs/heads/main/cmd_client.py"
 )
