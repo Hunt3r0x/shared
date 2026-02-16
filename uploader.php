@@ -1,106 +1,69 @@
 <?php
-// Simple file upload/download manager
-// Files are stored in the same directory as this script (__DIR__).
-//
-// Windows / php.ini notes:
-// - Ensure `file_uploads = On`
-// - Increase `upload_max_filesize` and `post_max_size` if you need large uploads
-// - `max_file_uploads` controls how many files can be uploaded at once
-//
-// This script intentionally accepts all file types and does not restrict
-// extensions or MIME types. It still keeps operations limited to this directory.
 
-// ----------------------------
-// Configuration
-// ----------------------------
+// Very simple upload/download page.
+// - Stores files in the same folder as this script.
+// - Accepts all file types (no extension/MIME checks).
 
-// Optional: uncomment and adjust if you want to override limits at runtime.
-// @ini_set('upload_max_filesize', '100M');
-// @ini_set('post_max_size', '100M');
+$dir         = __DIR__;
+$scriptName  = basename(__FILE__);
+$status      = '';
+$statusError = false;
 
-$statusMessage = '';
-$statusIsError = false;
-
-$scriptName = basename(__FILE__);
-$baseDir    = __DIR__;
-
-// ----------------------------
-// Helper: sanitize filename (allow simple names only)
-// ----------------------------
-function sanitize_filename(string $name): string
+function clean_name(string $name): string
 {
-    // Remove any path components
-    $name = basename($name);
-
-    // Optionally trim control characters/whitespace
-    $name = trim($name);
-
-    return $name;
+    return trim(basename($name));
 }
 
-// ----------------------------
-// Helper: generate collision-free path
-// ----------------------------
-function unique_target_path(string $dir, string $filename): string
+function unique_path(string $dir, string $filename): string
 {
-    $target = $dir . DIRECTORY_SEPARATOR . $filename;
-    if (!file_exists($target)) {
-        return $target;
+    $path = $dir . DIRECTORY_SEPARATOR . $filename;
+    if (!file_exists($path)) {
+        return $path;
     }
 
-    $dotPos = strrpos($filename, '.');
-    if ($dotPos === false) {
+    $dot = strrpos($filename, '.');
+    if ($dot === false) {
         $name = $filename;
         $ext  = '';
     } else {
-        $name = substr($filename, 0, $dotPos);
-        $ext  = substr($filename, $dotPos); // includes the dot
+        $name = substr($filename, 0, $dot);
+        $ext  = substr($filename, $dot);
     }
 
-    $counter = 1;
+    $i = 1;
     do {
-        $candidate = $name . '_' . $counter . $ext;
-        $target    = $dir . DIRECTORY_SEPARATOR . $candidate;
-        $counter++;
-    } while (file_exists($target));
+        $candidate = $name . '_' . $i . $ext;
+        $path      = $dir . DIRECTORY_SEPARATOR . $candidate;
+        $i++;
+    } while (file_exists($path));
 
-    return $target;
+    return $path;
 }
 
-// ----------------------------
-// Download handling
-// ----------------------------
+// Download
 if (isset($_GET['download'])) {
-    $requested = $_GET['download'];
+    $name = (string)$_GET['download'];
 
-    // Basic validation to prevent directory traversal
-    if (strpos($requested, '..') !== false || strpos($requested, '/') !== false || strpos($requested, '\\') !== false) {
+    if (strpos($name, '..') !== false || strpos($name, '/') !== false || strpos($name, '\\') !== false) {
         http_response_code(400);
-        echo 'Invalid file name.';
+        echo 'Invalid file name';
         exit;
     }
 
-    $requested = sanitize_filename($requested);
-    $path      = $baseDir . DIRECTORY_SEPARATOR . $requested;
+    $name = clean_name($name);
+    $path = $dir . DIRECTORY_SEPARATOR . $name;
 
     if (!is_file($path) || !is_readable($path)) {
         http_response_code(404);
-        echo 'File not found.';
+        echo 'File not found';
         exit;
     }
 
-    // Send file for download
-    $filesize = filesize($path);
-
-    header('Content-Description: File Transfer');
     header('Content-Type: application/octet-stream');
-    header('Content-Disposition: attachment; filename="' . rawbasename($path) . '"');
-    header('Content-Length: ' . $filesize);
-    header('Cache-Control: must-revalidate');
-    header('Pragma: public');
-    header('Expires: 0');
+    header('Content-Disposition: attachment; filename="' . basename($path) . '"');
+    header('Content-Length: ' . filesize($path));
+    header('Cache-Control: no-cache');
 
-    // Clean output buffer if any
     if (function_exists('ob_get_level')) {
         while (ob_get_level() > 0) {
             ob_end_clean();
@@ -111,84 +74,70 @@ if (isset($_GET['download'])) {
     exit;
 }
 
-// Helper because PHP lacks rawbasename()
-function rawbasename(string $path): string
-{
-    $base = basename($path);
-    // Ensure it's safe for header; rawurlencode could be used in more complex cases
-    return $base;
-}
-
-// ----------------------------
-// Upload handling
-// ----------------------------
+// Upload
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
     $file = $_FILES['file'];
 
     if (!isset($file['error']) || is_array($file['error'])) {
-        $statusMessage = 'Unexpected upload error.';
-        $statusIsError = true;
+        $status      = 'Unexpected upload error.';
+        $statusError = true;
     } elseif ($file['error'] !== UPLOAD_ERR_OK) {
         switch ($file['error']) {
             case UPLOAD_ERR_INI_SIZE:
             case UPLOAD_ERR_FORM_SIZE:
-                $statusMessage = 'File is too large (check upload_max_filesize/post_max_size).';
+                $status = 'File too large (check PHP limits).';
                 break;
             case UPLOAD_ERR_PARTIAL:
-                $statusMessage = 'File was only partially uploaded.';
+                $status = 'Upload was partial.';
                 break;
             case UPLOAD_ERR_NO_FILE:
-                $statusMessage = 'No file was uploaded.';
+                $status = 'No file chosen.';
                 break;
             default:
-                $statusMessage = 'Unknown upload error code: ' . (int)$file['error'];
+                $status = 'Upload error code: ' . (int)$file['error'];
         }
-        $statusIsError = true;
+        $statusError = true;
     } else {
-        $originalName = $file['name'] ?? 'uploaded_file';
-        $safeName     = sanitize_filename($originalName);
-
-        if ($safeName === '') {
-            $safeName = 'uploaded_file';
+        $original = $file['name'] ?? 'file';
+        $name     = clean_name($original);
+        if ($name === '') {
+            $name = 'file';
         }
 
-        $targetPath = unique_target_path($baseDir, $safeName);
+        $target = unique_path($dir, $name);
 
         if (!is_uploaded_file($file['tmp_name'])) {
-            $statusMessage = 'Possible file upload attack detected.';
-            $statusIsError = true;
-        } elseif (!move_uploaded_file($file['tmp_name'], $targetPath)) {
-            $statusMessage = 'Failed to move uploaded file.';
-            $statusIsError = true;
+            $status      = 'Upload not accepted by PHP.';
+            $statusError = true;
+        } elseif (!move_uploaded_file($file['tmp_name'], $target)) {
+            $status      = 'Could not save file.';
+            $statusError = true;
         } else {
-            $statusMessage = 'File uploaded successfully as ' . basename($targetPath) . '.';
-            $statusIsError = false;
+            $status      = 'Uploaded as ' . basename($target) . '.';
+            $statusError = false;
         }
     }
 }
 
-// ----------------------------
-// Directory listing
-// ----------------------------
+// List files in this folder (excluding script itself and obvious system files)
 $files = [];
-foreach (scandir($baseDir) as $entry) {
+foreach (scandir($dir) as $entry) {
     if ($entry === '.' || $entry === '..') {
         continue;
     }
     if ($entry === $scriptName) {
         continue;
     }
-    // Skip obvious system files if you want
     if (strcasecmp($entry, 'Thumbs.db') === 0) {
         continue;
     }
 
-    $fullPath = $baseDir . DIRECTORY_SEPARATOR . $entry;
-    if (is_file($fullPath)) {
+    $full = $dir . DIRECTORY_SEPARATOR . $entry;
+    if (is_file($full)) {
         $files[] = [
             'name' => $entry,
-            'size' => filesize($fullPath),
-            'time' => filemtime($fullPath),
+            'size' => filesize($full),
+            'time' => filemtime($full),
         ];
     }
 }
@@ -198,7 +147,7 @@ foreach (scandir($baseDir) as $entry) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Simple File Upload/Download</title>
+    <title>Uploader</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -271,12 +220,12 @@ foreach (scandir($baseDir) as $entry) {
 </head>
 <body>
 
-<h1>Simple File Upload/Download</h1>
+<h1>File uploader</h1>
 
 <div class="panel">
-    <?php if ($statusMessage !== ''): ?>
-        <div class="status <?php echo $statusIsError ? 'error' : 'ok'; ?>">
-            <?php echo htmlspecialchars($statusMessage, ENT_QUOTES, 'UTF-8'); ?>
+    <?php if ($status !== ''): ?>
+        <div class="status <?php echo $statusError ? 'error' : 'ok'; ?>">
+            <?php echo htmlspecialchars($status, ENT_QUOTES, 'UTF-8'); ?>
         </div>
     <?php endif; ?>
 
@@ -290,7 +239,7 @@ foreach (scandir($baseDir) as $entry) {
 <div class="panel">
     <h2>Available files</h2>
     <?php if (empty($files)): ?>
-        <p class="empty">No files in this directory yet (besides the script itself).</p>
+        <p class="empty">No files yet.</p>
     <?php else: ?>
         <table>
             <thead>

