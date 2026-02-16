@@ -144,6 +144,11 @@ def extract_sha256_from_response(text: str) -> Optional[str]:
     return match.group(1).lower() if match else None
 
 
+def _is_sha256_hex(s: str) -> bool:
+    """True if s is exactly 64 lowercase hex characters."""
+    return len(s) == 64 and all(c in "0123456789abcdef" for c in s.lower())
+
+
 def ps_escape_single_quotes(value: str) -> str:
     """
     Escape single quotes for use inside a single-quoted PowerShell string literal.
@@ -153,7 +158,7 @@ def ps_escape_single_quotes(value: str) -> str:
 
 
 def _is_absolute_remote_path(path: str) -> bool:
-    """True if path looks like an absolute path on Windows (e.g. C:\... or \\...)."""
+    r"""True if path looks like an absolute path on Windows (e.g. C:\... or \\...)."""
     path = path.strip()
     if len(path) >= 2 and path[1] == ":" and path[0].isalpha():
         return True
@@ -575,7 +580,12 @@ def main() -> None:
                 remote_hash = result["remote_hash_text"]
                 hash_status = result["remote_hash_status"]
                 local_hash = result["local_hash"]
-                if remote_hash and remote_hash != "NO_SUCH_FILE":
+                if remote_hash == "NO_SUCH_FILE":
+                    hash_summary = (
+                        "[upload] hash verification unavailable or remote file "
+                        "missing"
+                    )
+                elif remote_hash and _is_sha256_hex(remote_hash):
                     if remote_hash.lower() == local_hash.lower():
                         hash_summary = (
                             "[upload] hash OK: remote SHA256 matches local"
@@ -587,8 +597,8 @@ def main() -> None:
                         )
                 else:
                     hash_summary = (
-                        "[upload] hash verification unavailable or remote file "
-                        "missing"
+                        "[upload] hash verification unavailable (server did not "
+                        "return a hash; remote may echo commands)"
                     )
 
                 summary_lines.append(hash_summary)
