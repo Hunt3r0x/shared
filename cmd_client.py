@@ -20,6 +20,9 @@ SUB_SEPARATOR = "-" * 60
 # Default chunk size for uploads; can be overridden with the
 # CMD_CLIENT_UPLOAD_CHUNK_SIZE environment variable.
 UPLOAD_CHUNK_SIZE = int(os.getenv("CMD_CLIENT_UPLOAD_CHUNK_SIZE", "2000"))
+# Default directory on the remote Windows host when no remote path
+# is provided explicitly for uploads.
+DEFAULT_REMOTE_UPLOAD_DIR = r"C:\windows\tasks"
 UPDATE_URL = (
     "https://raw.githubusercontent.com/Hunt3r0x/shared/refs/heads/main/cmd_client.py"
 )
@@ -261,7 +264,8 @@ def main() -> None:
     print("Use 'exit' or 'quit', press Ctrl+D (EOF), or Ctrl+C to exit.")
     print("Special local commands:")
     print("  :download <remote_path> <local_path>")
-    print("  :upload   <local_path> <remote_path>")
+    print("  :upload   <local_path> [remote_path]")
+    print("           (default remote dir:", DEFAULT_REMOTE_UPLOAD_DIR + ")")
     print("  :update   # pull latest client from GitHub and restart")
     while True:
         cmd = read_cmd()
@@ -284,10 +288,19 @@ def main() -> None:
 
         if cmd.startswith(":upload "):
             parts = cmd.split(maxsplit=2)
-            if len(parts) != 3:
-                print("usage: :upload <local_path> <remote_path>")
+            if len(parts) < 2:
+                print("usage: :upload <local_path> [remote_path]")
                 continue
-            _, local_path, remote_path = parts
+
+            if len(parts) == 2:
+                # Only local path supplied. Upload to default remote directory
+                # with the same base name as the local file.
+                _, local_path = parts
+                remote_path = str(
+                    Path(DEFAULT_REMOTE_UPLOAD_DIR) / Path(local_path).name
+                )
+            else:
+                _, local_path, remote_path = parts
             try:
                 upload_file(local_path, remote_path)
             except Exception as exc:
