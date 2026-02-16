@@ -1,4 +1,6 @@
 import base64
+import os
+import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -16,6 +18,9 @@ TIMEOUT = None
 SEPARATOR = "=" * 60
 SUB_SEPARATOR = "-" * 60
 UPLOAD_CHUNK_SIZE = 2000  # bytes per chunk when uploading large files
+UPDATE_URL = (
+    "https://raw.githubusercontent.com/Hunt3r0x/shared/refs/heads/main/cmd_client.py"
+)
 
 
 def build_url() -> str:
@@ -214,19 +219,55 @@ def read_cmd() -> Optional[str]:
     return value
 
 
+def perform_update() -> None:
+    """
+    Fetch the latest cmd_client.py from GitHub, overwrite the local file,
+    and restart this script so the new version is used immediately.
+    """
+    print(f"[update] fetching latest client from:\n         {UPDATE_URL}")
+    try:
+        res = requests.get(UPDATE_URL, timeout=15)
+    except requests.RequestException as exc:
+        print(f"[update error] request failed: {exc}")
+        return
+
+    if not res.ok:
+        print(f"[update error] http {res.status_code}: {res.text.strip()}")
+        return
+
+    new_source = res.text
+    target = Path(__file__).resolve()
+    backup = target.with_suffix(target.suffix + ".bak")
+
+    try:
+        if target.exists():
+            backup.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+            print(f"[update] backup written to {backup}")
+        target.write_text(new_source, encoding="utf-8")
+    except OSError as exc:
+        print(f"[update error] failed to write file: {exc}")
+        return
+
+    print(f"[update] updated {target.name} ({len(new_source.encode('utf-8'))} bytes)")
+    print("[update] restarting client with new version...")
+    # Replace the current process with a fresh Python running this script.
+    os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
 def main() -> None:
     print("Type commands to send to the remote shell.")
     print("Use 'exit' or 'quit', press Ctrl+D (EOF), or Ctrl+C to exit.")
     print("Special local commands:")
     print("  :download <remote_path> <local_path>")
-    print("  :upload <local_path> <remote_path>")
+    print("  :upload   <local_path> <remote_path>")
+    print("  :update   # pull latest client from GitHub and restart")
     while True:
         cmd = read_cmd()
         if cmd is None:
             print("Exiting client.")
             break
 
-        # Local meta-commands for file transfer
+        # Local meta-commands
         if cmd.startswith(":download "):
             parts = cmd.split(maxsplit=2)
             if len(parts) != 3:
@@ -249,6 +290,15 @@ def main() -> None:
                 upload_file(local_path, remote_path)
             except Exception as exc:
                 print(f"[upload error] {exc}")
+            continue
+
+        if cmd.strip() == ":update":
+            try:
+                perform_update()
+            except Exception as exc:
+                print(f"[update error] {exc}")
+            # If perform_update succeeds, os.execv will replace this process
+            # and we will never reach this point.
             continue
 
         try:
