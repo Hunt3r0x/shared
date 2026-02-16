@@ -3,6 +3,11 @@ from typing import Optional, Tuple
 
 import requests
 
+try:
+    import readline  # type: ignore[import]
+except Exception:
+    readline = None  # type: ignore[assignment]
+
 SCHEME = "http"
 HOST = "10.143.4.133"
 PATH = "/includes/shell.php"
@@ -75,18 +80,35 @@ def read_cmd() -> Optional[str]:
     value = value.strip()
     if not value or value.lower() in ("exit", "quit"):
         return None
+    if readline is not None and value:
+        try:
+            readline.add_history(value)
+        except Exception:
+            pass
     return value
 
 
 def main() -> None:
+    print("Type commands to send to the remote shell.")
+    print("Use 'exit' or 'quit', press Ctrl+D (EOF), or Ctrl+C to exit.")
     while True:
         cmd = read_cmd()
         if cmd is None:
+            print("Exiting client.")
             break
-        body, status = send_command(cmd)
+        try:
+            body, status = send_command(cmd)
+        except KeyboardInterrupt:
+            # Allow Ctrl+C during a running request to exit cleanly
+            print("\n[interrupted while sending command, exiting]")
+            break
         print_response(cmd, body, status)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # Fallback handler for any uncaught Ctrl+C
+        print("\n[interrupted by user, exiting]")
 
