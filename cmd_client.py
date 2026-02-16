@@ -1,5 +1,4 @@
 import base64
-import shlex
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -16,6 +15,7 @@ PATH = "/includes/shell.php"
 TIMEOUT = None
 SEPARATOR = "=" * 60
 SUB_SEPARATOR = "-" * 60
+UPLOAD_CHUNK_SIZE = 2000  # bytes per chunk when uploading large files
 
 
 def build_url() -> str:
@@ -112,21 +112,66 @@ def upload_file(local_path: str, remote_path: str) -> None:
         raise FileNotFoundError(f"local file not found: {local_path}")
 
     data = path.read_bytes()
-    b64 = base64.b64encode(data).decode("ascii")
+    total = len(data)
 
-    # We wrap the base64 string in single quotes; base64 output will not
-    # contain single quotes, so this is safe.
+    if total == 0:
+        raise ValueError("cannot upload empty file")
+
     remote_ps = ps_escape_single_quotes(remote_path)
-    cmd = (
-        "powershell -NoLogo -NonInteractive -Command "
-        f"\"[IO.File]::WriteAllBytes('{remote_ps}', "
-        f"[Convert]::FromBase64String('{b64}'))\""
-    )
-    body, status = send_command(cmd)
 
-    # If there was any error, it'll show up in the body; we just print it.
-    print_response(f"[upload {local_path} -> {remote_path}]", body, status)
-    print(f"[upload] sent '{local_path}' ({len(data)} bytes) to remote '{remote_path}'")
+    # Send the file in small chunks so we do not hit command-line length
+    # limits or HTTP/server size limits.
+    first = True
+    offset = 0
+    last_body: str = ""
+    last_status: Optional[int] = None
+    chunk_index = 0
+
+    while offset < total:
+        chunk = data[offset : offset + UPLOAD_CHUNK_SIZE]
+        offset += len(chunk)
+        b64 = base64.b64encode(chunk).decode("ascii")
+        chunk_index += 1
+
+        if first:
+            # First chunk: create/overwrite the file
+            ps_cmd = (
+                f"[IO.File]::WriteAllBytes('{remote_ps}', "
+                f"[Convert]::FromBase64String('{b64}'))"
+            )
+            first = False
+        else:
+            # Subsequent chunks: append to the existing file
+            ps_cmd = (
+                "$p='{remote}';"
+                "$d=[Convert]::FromBase64String('{b64}');"
+                "$fs=[IO.File]::Open($p,[IO.FileMode]::Append);"
+                "$fs.Write($d,0,$d.Length);"
+                "$fs.Close()"
+            ).format(remote=remote_ps, b64=b64)
+
+        cmd = "powershell -NoLogo -NonInteractive -Command " f"\"{ps_cmd}\""
+        last_body, last_status = send_command(cmd)
+        if last_status is not None and last_status != 200:
+            raise RuntimeError(
+                f"upload chunk failed with status={last_status}: {last_body}"
+            )
+        # Give some feedback for large uploads
+        print(f"[upload] sent chunk {chunk_index}, {len(chunk)} bytes")
+
+    # Optionally, verify remote size
+    verify_cmd = (
+        "powershell -NoLogo -NonInteractive -Command "
+        f"\"if (Test-Path '{remote_ps}') "
+        "{(Get-Item '{remote_ps}').Length} else {{'[no such file]'}}\""
+    )
+    verify_body, verify_status = send_command(verify_cmd)
+
+    print_response(f"[upload {local_path} -> {remote_path}]", last_body, last_status)
+    print(
+        f"[upload] finished '{local_path}' ({total} bytes) to remote '{remote_path}'"
+    )
+    print_response("[upload verify remote size]", verify_body, verify_status)
 
 
 def print_response(cmd: str, body: str, status: Optional[int]) -> None:
