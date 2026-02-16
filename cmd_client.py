@@ -265,7 +265,7 @@ def main() -> None:
     print("Special local commands:")
     print("  :download <remote_path> <local_path>")
     print("  :upload   <local_path> [remote_path]")
-    print("           (default remote dir:", DEFAULT_REMOTE_UPLOAD_DIR + ")")
+    print(f"           (default remote dir: {DEFAULT_REMOTE_UPLOAD_DIR})")
     print("  :update   # pull latest client from GitHub and restart")
     while True:
         cmd = read_cmd()
@@ -286,21 +286,25 @@ def main() -> None:
                 print(f"[download error] {exc}")
             continue
 
-        if cmd.startswith(":upload "):
-            parts = cmd.split(maxsplit=2)
-            if len(parts) < 2:
+        if cmd.startswith(":upload"):
+            # Accept both:
+            #   :upload <local>
+            #   :upload <local> <remote>
+            rest = cmd[len(":upload") :].strip()
+            if not rest:
                 print("usage: :upload <local_path> [remote_path]")
                 continue
 
-            if len(parts) == 2:
+            parts = rest.split(maxsplit=1)
+            local_path = parts[0]
+            if len(parts) == 1:
                 # Only local path supplied. Upload to default remote directory
                 # with the same base name as the local file.
-                _, local_path = parts
                 remote_path = str(
                     Path(DEFAULT_REMOTE_UPLOAD_DIR) / Path(local_path).name
                 )
             else:
-                _, local_path, remote_path = parts
+                remote_path = parts[1]
             try:
                 upload_file(local_path, remote_path)
             except Exception as exc:
