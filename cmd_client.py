@@ -274,14 +274,40 @@ def perform_update() -> None:
     os.execv(sys.executable, [sys.executable, str(target)] + sys.argv[1:])
 
 
+def print_help() -> None:
+    """
+    Show available local/meta commands and basic usage.
+    """
+    print(SEPARATOR)
+    print("Local/meta commands:")
+    print(SUB_SEPARATOR)
+    print("  :download <remote_path> <local_path>")
+    print("      Download a file from the remote host to this machine.")
+    print()
+    print("  :upload <local_path> [remote_path]")
+    print(
+        f"      Upload a local file to the remote host. If remote_path is omitted,"
+    )
+    print(
+        f"      the file is stored as {DEFAULT_REMOTE_UPLOAD_DIR}\\<filename> on the remote."
+    )
+    print()
+    print("  :update")
+    print("      Pull the latest client from GitHub and restart.")
+    print()
+    print("  :help")
+    print("      Show this help message.")
+    print()
+    print("General:")
+    print("  - Any other input is sent as a command to the remote shell.")
+    print("  - Use 'exit' or 'quit', or send EOF to exit the client.")
+    print(SEPARATOR)
+
+
 def main() -> None:
     print("Type commands to send to the remote shell.")
-    print("Use 'exit' or 'quit', press Ctrl+D (EOF), or Ctrl+C to exit.")
-    print("Special local commands:")
-    print("  :download <remote_path> <local_path>")
-    print("  :upload   <local_path> [remote_path]")
-    print(f"           (default remote dir: {DEFAULT_REMOTE_UPLOAD_DIR})")
-    print("  :update   # pull latest client from GitHub and restart")
+    print("Use 'exit' or 'quit', or send EOF to exit.")
+    print("Type ':help' for a list of local commands.")
     while True:
         cmd = read_cmd()
         if cmd is None:
@@ -292,6 +318,10 @@ def main() -> None:
             continue
 
         # Local meta-commands
+        if cmd.strip() == ":help":
+            print_help()
+            continue
+
         if cmd.startswith(":download "):
             parts = cmd.split(maxsplit=2)
             if len(parts) != 3:
