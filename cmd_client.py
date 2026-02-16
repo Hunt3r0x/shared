@@ -209,14 +209,31 @@ def print_response(cmd: str, body: str, status: Optional[int]) -> None:
 
 
 def read_cmd() -> Optional[str]:
+    """
+    Read a single command from the user.
+
+    Behaviour:
+    - EOF (Ctrl+D / Ctrl+Z+Enter on Windows) => return None (caller exits)
+    - Empty line => return "" (caller just reprompts)
+    - "exit"/"quit" => return None (caller exits)
+    - Ctrl+C while typing => return "" (cancel current input, new prompt)
+    """
     try:
         value = input("cmd> ")
-    except (EOFError, KeyboardInterrupt):
+    except EOFError:
+        # Graceful end-of-input: tell caller to exit.
         return None
+    except KeyboardInterrupt:
+        # Cancel the current line, show a fresh prompt.
+        print()
+        return ""
+
     value = value.strip()
-    if not value or value.lower() in ("exit", "quit"):
+    if not value:
+        return ""
+    if value.lower() in ("exit", "quit"):
         return None
-    if readline is not None and value:
+    if readline is not None:
         try:
             readline.add_history(value)
         except Exception:
@@ -251,8 +268,10 @@ def perform_update() -> None:
 
     print(f"[update] updated {target.name} ({len(new_source.encode('utf-8'))} bytes)")
     print("[update] restarting client with new version...")
-    # Replace the current process with a fresh Python running this script.
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+    # Replace the current process with a fresh Python running THIS file
+    # explicitly, so any previously imported module state is discarded.
+    sys.stdout.flush()
+    os.execv(sys.executable, [sys.executable, str(target)] + sys.argv[1:])
 
 
 def main() -> None:
@@ -268,6 +287,9 @@ def main() -> None:
         if cmd is None:
             print("Exiting client.")
             break
+        if cmd == "":
+            # Blank/aborted input: just reprompt
+            continue
 
         # Local meta-commands
         if cmd.startswith(":download "):
@@ -319,16 +341,13 @@ def main() -> None:
         try:
             body, status = send_command(cmd)
         except KeyboardInterrupt:
-            # Allow Ctrl+C during a running request to exit cleanly
-            print("\n[interrupted while sending command, exiting]")
-            break
+            # Allow Ctrl+C during a running request to abort the command
+            # but keep the client running.
+            print("\n[interrupted, command cancelled]")
+            continue
         print_response(cmd, body, status)
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        # Fallback handler for any uncaught Ctrl+C
-        print("\n[interrupted by user, exiting]")
+    main()
 
