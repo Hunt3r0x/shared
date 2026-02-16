@@ -37,3 +37,5 @@ $dn=([ADSI]"LDAP://RootDSE").defaultNamingContext;$n=$env:COMPUTERNAME;$s=New-Ob
 
 # PS Search 
 powershell.exe -Command "Get-ChildItem -Recurse -File | Select-String -Pattern 'username|password' | Select-Object FileName, LineNumber, Line"
+
+wmic service get name,startname,state,pathname | findstr /v "LocalSystem LocalService NetworkService"
