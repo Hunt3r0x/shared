@@ -242,12 +242,8 @@ def perform_update() -> None:
 
     new_source = res.text
     target = Path(__file__).resolve()
-    backup = target.with_suffix(target.suffix + ".bak")
 
     try:
-        if target.exists():
-            backup.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
-            print(f"[update] backup written to {backup}")
         target.write_text(new_source, encoding="utf-8")
     except OSError as exc:
         print(f"[update error] failed to write file: {exc}")
