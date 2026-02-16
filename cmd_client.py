@@ -13,7 +13,7 @@ except Exception:
 
 SCHEME = "http"
 HOST = "10.143.4.133"
-PATH = "/includes/shell.php"
+PATH = "/imshelldeepstrike.php"
 TIMEOUT = None
 SEPARATOR = "=" * 60
 SUB_SEPARATOR = "-" * 60
